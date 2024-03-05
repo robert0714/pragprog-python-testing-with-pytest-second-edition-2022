@@ -26,8 +26,9 @@ pip install pytest pylint
 ```
 ## In AnaConda
 Installing `pytest` from the `conda-forge` channel can be achieved by adding `conda-forge` to your channels with:
-
 ```
+conda create -n myenv python=3.8
+conda activate myenv
 conda config --add channels conda-forge
 conda config --set channel_priority strict
 ```
