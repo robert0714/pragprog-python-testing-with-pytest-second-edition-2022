@@ -1,0 +1,5 @@
+
+[paths]
+source =
+    cards_proj/src/cards
+    */site-packages/cards
