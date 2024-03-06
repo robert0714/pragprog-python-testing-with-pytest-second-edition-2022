@@ -322,3 +322,229 @@ We can see that the setup for **db** happens first, and has session scope (from 
 
 Using multiple stage fixtures like this can provide some incredible speed benefits and maintain test order independence.
 
+## Using Multiple Fixtures per Test or Fixture
+Another way we can use multiple fixtures is just to use more than one in either a function or a fixture. As an example, we can put some pre-canned tasks together to test with as [a fixture](./c/conftest.py?plain=1#L24-L32):
+```python
+@pytest.fixture(scope="session")
+def some_cards():
+    """List of different Card objects"""
+    return [
+        cards.Card("write book", "Brian", "done"),
+        cards.Card("edit book", "Katie", "done"),
+        cards.Card("write 2nd edition", "Brian", "todo"),
+        cards.Card("edit 2nd edition", "Katie", "todo"),
+    ]
+```
+Then we can use both **empty_db** and **some_cards** in [a test](./c/test_some.py?plain=1#L1-L5):
+```python
+def test_add_some(cards_db, some_cards):
+    expected_count = len(some_cards)
+    for c in some_cards:
+        cards_db.add_card(c)
+    assert cards_db.count() == expected_count
+```
+Fixtures can also use multiple other [fixture](./c/conftest.py?plain=1#L35-L40):
+```python
+@pytest.fixture(scope="function")
+def non_empty_db(cards_db, some_cards):
+    """CardsDB object that's been populated with 'some_cards'"""
+    for c in some_cards:
+        cards_db.add_card(c)
+    return cards_db
+```
+The fixture **non_empty_db** has to be function scope because it uses **cards_db**, which is function scope. If you try to make **non_empty_db** module scope or wider, pytest will throw an error. Remember that if you don’t specify a scope, you get function-scope fixtures.
+
+And now, [tests that need a database with stuff in it can do that easily](./c/test_some.py?plain=1#L8-L9):
+```python
+def test_non_empty(non_empty_db):
+    assert non_empty_db.count() > 0
+```
+We’ve discussed how different fixture scopes work and how to use different scopes in different fixtures to our advantage. However, there may be times where you need a scope to be determined at runtime. That’s possible with dynamic scoping.
+
+## Deciding Fixture Scope Dynamically
+Let’s say we have the fixture setup as we do now, with ``db`` at session scope and ``cards_db`` at function scope, but we’re worried about it. The ``cards_db`` fixture is empty because it calls ``delete_all()``. But what if we don’t completely trust that ``delete_all()`` function yet, and want to put in place some way to completely set up the database for each test function?
+
+We can do this by dynamically deciding the scope of the ``db`` [fixture](./d/conftest.py?plain=1#L23-L30) at runtime. First, we change the scope of ``db``:
+```python
+@pytest.fixture(scope=db_scope)
+def db():
+    """CardsDB object connected to a temporary database"""
+    with TemporaryDirectory() as db_dir:
+        db_path = Path(db_dir)
+        db_ = cards.CardsDB(db_path)
+        yield db_
+        db_.close()
+```
+Instead of a specific scope, we’ve put in a function name, ``db_scope``. So we also have to write that [function](./d/conftest.py?plain=1#L16-L19):
+```python
+def db_scope(fixture_name, config):
+    if config.getoption("--func-db", None):
+        return "function"
+    return "session"
+```
+There are many ways we could have figured out which scope to use, but in this case, I chose to depend on a [new command-line flag, ``--func-db``](./d/conftest.py?plain=1#L7-L13). In order to allow pytest to allow us to use this new flag, we need to write a hook function (which I’ll cover in more depth in Chapter 15, [​Building Plugins](../ch15/README.md)​):
+```python
+def pytest_addoption(parser):
+    parser.addoption(
+        "--func-db",
+        action="store_true",
+        default=False,
+        help="new db for each test",
+    )
+```
+After all that, the default behavior is the same as before, with session-scope ``db``:
+```bash
+​ 	​$ ​​pytest​​ ​​--setup-show​​ ​​test_count.py
+================================================= test session starts =================================================
+platform win32 -- Python 3.8.18, pytest-8.0.2, pluggy-1.4.0
+rootdir: D:\Data\workspaces\tmp\pragprog-python-testing-with-pytest-second-edition-2022
+configfile: pytest.ini
+collected 2 items
+
+test_count.py
+SETUP    S db
+        SETUP    F cards_db (fixtures used: db)
+        ch03/d/test_count.py::test_empty (fixtures used: cards_db, db).
+        TEARDOWN F cards_db
+        SETUP    F cards_db (fixtures used: db)
+        ch03/d/test_count.py::test_two (fixtures used: cards_db, db).
+        TEARDOWN F cards_db
+TEARDOWN S db
+
+================================================== 2 passed in 0.05s ==================================================
+```
+But when we use the new flag, we get a function-scope ``db`` fixture:
+```bash
+​ 	​$ ​​pytest​​ ​​​--func-db​​ ​​test_count.py
+=================================================== test session starts ====================================================
+platform win32 -- Python 3.8.18, pytest-8.0.2, pluggy-1.4.0
+rootdir: D:\Data\workspaces\tmp\pragprog-python-testing-with-pytest-second-edition-2022
+configfile: pytest.ini
+collected 2 items
+
+test_count.py ..                                                                                                      [100%]
+
+==================================================== 2 passed in 0.05s =====================================================
+```
+The database is now set up before each test function, and torn down afterwards.
+
+## Using autouse for Fixtures That Always Get Used
+So far in this chapter, all of the fixtures used by tests were named by the tests or another fixture in a parameter list. However, you can use ``autouse=True`` to get a fixture to run all of the time. This works well for code you want to run at certain times, but tests don’t really depend on any system state or data from the fixture.
+
+Here’s a rather contrived [example](./test_autouse.py):
+```python
+import pytest
+import time
+
+
+@pytest.fixture(autouse=True, scope="session")
+def footer_session_scope():
+    """Report the time at the end of a session."""
+    yield
+    now = time.time()
+    print("--")
+    print(
+        "finished : {}".format(
+            time.strftime("%d %b %X", time.localtime(now))
+        )
+    )
+    print("-----------------")
+
+
+@pytest.fixture(autouse=True)
+def footer_function_scope():
+    """Report test durations after each function."""
+    start = time.time()
+    yield
+    stop = time.time()
+    delta = stop - start
+    print("\ntest duration : {:0.3} seconds".format(delta))
+
+
+def test_1():
+    """Simulate long-ish running test."""
+    time.sleep(1)
+
+
+def test_2():
+    """Simulate slightly longer test."""
+    time.sleep(1.23)
+
+```
+We want to add test times after each test, and the date and current time at the end of the session. Here’s what these look like:
+```bash
+​ 	​$ ​​cd​​ ​​/path/to/code/ch03​
+​ 	​$ ​​pytest​​ ​​-v​​ ​​-s​​ ​​test_autouse.py
+=================================================== test session starts ====================================================
+platform win32 -- Python 3.8.18, pytest-8.0.2, pluggy-1.4.0 -- d:\anaconda_envs_dirs\myenv\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Data\workspaces\tmp\pragprog-python-testing-with-pytest-second-edition-2022
+configfile: pytest.ini
+collected 2 items
+
+test_autouse.py::test_1 PASSED
+test duration : 1.01 seconds
+
+test_autouse.py::test_2 PASSED
+test duration : 1.25 seconds
+--
+finished : 06 Mar 22:19:25
+-----------------
+
+
+==================================================== 2 passed in 2.28s =====================================================
+```
+I used the ``-s`` flag in this example. It’s a shortcut flag for ``--capture=no`` that tells pytest to turn off output capture. I used it because the new fixtures have print functions in them, and I wanted to see the output. Without turning off output capture, pytest only prints the output of tests that fail.
+
+The ``autouse`` feature is good to have around. But it’s more of an exception than a rule. Opt for named fixtures unless you have a really great reason not to.
+## Renaming Fixtures
+The name of a fixture, listed in the parameter list of tests and other fixtures using it, is usually the same as the function name of the fixture. However, pytest allows you to rename fixtures with a **name** parameter to [``@pytest.fixture()``](./test_rename_fixture.py):
+```python
+import pytest
+
+
+@pytest.fixture(name="ultimate_answer")
+def ultimate_answer_fixture():
+    return 42
+
+
+def test_everything(ultimate_answer):
+    assert ultimate_answer == 42
+```
+I’ve run across a few examples where renaming is desirable. As in this example, some people like to name their fixtures with a`` _fixture`` suffix or ``fixture_`` prefix or similar.
+
+One instance where renaming is useful is when [the most obvious fixture name](./test_rename_2.py) already exists as an existing variable or function name:
+```python
+import pytest
+from somewhere import app
+
+
+@pytest.fixture(scope="session", name="app")
+def _app():
+    """The app object"""
+    yield app()
+
+
+def test_that_uses_app(app):
+    assert app.some_property == "something"
+```
+I usually only use fixture renaming with a fixture that lives in the same module as the tests using it, as renaming a fixture can make it harder to find where it’s defined. However, remember that there is always ``--fixtures``, which can help you find where a fixture lives.
+## Review
+In this chapter, we covered a lot about fixtures:
+* Fixtures are ``@pytest.fixture()`` decorated functions.
+* Test functions or other fixtures depend on a fixture by putting its name in their parameter list.
+* Fixtures can return data using ``return`` or ``yield``.
+* Code before the ``yield`` is the setup code. Code after the ``yield`` is the teardown code.
+* Fixtures can be set to function, class, module, package, or session scope. The default is function scope. You can even define the scope dynamically.
+* Multiple test functions can use the same fixture.
+* Multiple test modules can use the same fixture if it’s in a ``conftest.py`` file.
+* Multiple fixtures at different scope can speed up test suites while maintaining test isolation.
+* Tests and fixtures can use multiple fixtures.
+* Autouse fixtures don’t have to be named by the test function.
+* You can have the name of a fixture be different than the fixture function name.
+
+
+We also covered a few new command-line flags:
+* ``pytest --setup-show`` is used to see the order of execution.
+* ``pytest --fixtures`` is used to list available fixtures and where the fixture is located.
+* ``-s`` and ``--capture=no`` allow print statements to be seen even in passing tests.
