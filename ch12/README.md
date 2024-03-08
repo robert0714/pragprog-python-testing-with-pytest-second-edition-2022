@@ -22,7 +22,7 @@ These are the questions this chapter will answer.
 >  create a new one. Here’s a refresher on how to do that:
 >  ```bash
 >  $ cd /path/to/code/ch12
->  $ python3 -m venv venv
+>  $ python -m venv .venv
 >  $ source venv/bin/activate
 >  (venv) $ pip install -U pip
 >  (venv) $ pip install pytest
@@ -327,7 +327,7 @@ The ``requirements.txt`` files are used to recreate a running environment with `
 
 A reasonable process would then be:
 * Get the code somehow. For example, ``git clone <repository of project>``.
-* Create a virtual environment with ``python3 -m venv venv``.
+* Create a virtual environment with ``python -m venv .venv``.
 * Activate the virtual environment.
 * Install the dependencies with ``pip install -r requirements.txt``.
 * Run the application.

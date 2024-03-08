@@ -3,20 +3,20 @@
 
 ## In Linux    
 ```bash  
-​ 	$ python3 -m venv venv
+​ 	$ python -m venv .venv
 ​ 	$ source venv/bin/activate
 ​ 	(venv) $ pip install pytest
 ```
 ## In Windows
 ### CMD
 ```cmd 
-   C:\> python -m venv venv
+   C:\> python -m venv .venv
    C:\> venv\Scripts\activate.bat
    C:\> pip install pytest
 ```
 ### Powershell
 ```powershell 
-​ 	PS C:\> python -m venv venv
+​ 	PS C:\> python -m venv .venv
 ​ 	PS C:\> venv\Scripts\Activate.ps1
 ​ 	PS C:\> pip install pytest
 ```
